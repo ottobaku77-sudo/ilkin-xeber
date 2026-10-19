@@ -8,12 +8,24 @@ concurrency: {group: pages, cancel-in-progress: true}
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: {name: github-pages}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: "3.12"}
+      # translation cache (cache/translations.json) is carried between runs so headlines are translated only once
+      - uses: actions/cache/restore@v4
+        with:
+          path: cache/translations.json
+          key: tr-${{ github.run_id }}
+          restore-keys: tr-
       - run: pip install feedparser && python build.py
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: cache/translations.json
+          key: tr-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-pages-artifact@v3
         with: {path: site}
       - uses: actions/deploy-pages@v4

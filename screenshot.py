@@ -1,7 +1,7 @@
 import asyncio, sys
 from playwright.async_api import async_playwright
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080/"
-SHOTS = [("", "screenshot"), ("futbol.html", "screenshot_futbol"), ("futbol.html?club=Real+Madrid", "screenshot_real")]
+SHOTS = [("futbol.html?world=1", "screenshot_futbol_world"), ("", "screenshot"), ("futbol.html", "screenshot_futbol"), ("futbol.html?club=Real+Madrid", "screenshot_real")]
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch()

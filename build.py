@@ -14,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import feedparser
 
+import translate as tr
+
 socket.setdefaulttimeout(25)
 SITE_NAME = "İlkin xəbər"
 ROOT = Path(__file__).resolve().parent
@@ -59,6 +61,42 @@ FEEDS = [
     ("Vesti.az",      "https://vesti.az/rss",               "ru", "news"),
     ("Minval",        "https://minval.az/rss",              "ru", "news"),
 ]
+
+# --- Dünya futbolu: beynəlxalq mənbələr (başlıq + qısa anons avtomatik AZ dilinə tərcümə olunur) ---
+# (name, url, source language, club tag forced for club-specific feeds)
+WORLD_FEEDS = [
+    ("BBC Sport",           "https://feeds.bbci.co.uk/sport/football/rss.xml", "en", None),
+    ("Sky Sports",          "https://www.skysports.com/rss/11095",             "en", None),
+    ("The Guardian",        "https://www.theguardian.com/football/rss",        "en", None),
+    ("The Independent",     "https://www.independent.co.uk/sport/football/rss", "en", None),
+    ("ESPN",                "https://www.espn.com/espn/rss/soccer/news",       "en", None),
+    ("UEFA",                "https://www.uefa.com/rssfeed/news/rss.xml",       "en", None),
+    ("CBS Sports",          "https://www.cbssports.com/rss/headlines/soccer/", "en", None),
+    ("Football365",         "https://www.football365.com/rss",                "en", None),
+    ("Football Italia",     "https://football-italia.net/feed/",               "en", None),
+    ("Marca",               "https://e00-marca.uecdn.es/rss/futbol/primera-division.xml", "es", None),
+    ("Marca · Real Madrid", "https://e00-marca.uecdn.es/rss/futbol/real-madrid.xml", "es", "Real Madrid"),
+    ("AS",                  "https://feeds.as.com/mrss-s/pages/as/site/as.com/section/futbol/portada/", "es", None),
+    ("Mundo Deportivo",     "https://www.mundodeportivo.com/rss/futbol",       "es", None),
+    ("Mundo Deportivo · Barça", "https://www.mundodeportivo.com/rss/futbol/fc-barcelona", "es", "Barselona"),
+    ("Mundo Deportivo · Real Madrid", "https://www.mundodeportivo.com/rss/futbol/real-madrid", "es", "Real Madrid"),
+    ("Sport · Real Madrid", "https://www.sport.es/es/rss/real-madrid/rss.xml", "es", "Real Madrid"),
+    ("La Gazzetta dello Sport", "https://www.gazzetta.it/dynamic-feed/rss/section/Calcio.xml", "it", None),
+    ("Corriere dello Sport", "https://www.corrieredellosport.it/rss/calcio",   "it", None),
+    ("Kicker",              "https://newsfeed.kicker.de/news/fussball",        "de", None),
+]
+WORLD_PER_SOURCE = 20
+NOT_FOOTBALL_URL = re.compile(r"/(tennis|cricket|nba|nfl|f1|formula-1|boxing|golf|rugby[\w-]*|basket\w*|baloncesto|motor\w*|ciclismo|watch|video|videos)/", re.I)
+WORLD_EXCERPT = 200          # source chars sent for translation
+LANG_LABEL = {"en": "EN", "es": "ES", "it": "IT", "de": "DE"}
+# Strict club detection for international (EN/ES/IT/DE) text: "Madrid" alone is ambiguous there.
+WORLD_CLUBS = {
+    "Real Madrid": re.compile(r"real madrid|madridista|bernab[eé]u|mbapp[eé]|vin[ií]cius|xabi alonso|bellingham|arda g[uü]ler|"
+                              r"los blancos|merengue|el cl[aá]sico|\bel madrid\b|\bdel madrid\b|\bal madrid\b|valdebebas", re.I),
+    "Barselona":   re.compile(r"(?<!espanyol de )barcelona|bar[çc]a\b|azulgrana|blaugrana|\bcul[eé]s?\b|lamine yamal|\byamal\b|"
+                              r"lewandowski|hansi flick|\bflick\b|camp nou|el cl[aá]sico|\bpedri\b|raphinha|joan laporta|\blaporta\b", re.I),
+}
+
 LIMIT = {"football": 40, "sport": 40, "clubs": 30}
 SCAN = {"clubs": 400}
 
@@ -222,12 +260,83 @@ def fetch(source, url, lang, kind):
     return source, url, lang, items, getattr(d, "status", None)
 
 
+def fetch_world(source, url, lang, club):
+    try:
+        d = feedparser.parse(url, agent=UA)
+    except Exception as ex:
+        return source, url, "world", [], f"ERR {ex}"
+    now, items = datetime.now(timezone.utc), []
+    for e in d.entries[:150]:
+        if len(items) >= WORLD_PER_SOURCE:
+            break
+        title, link = clean(e.get("title")), e.get("link")
+        if not title or not link or NOT_FOOTBALL_URL.search(link):
+            continue
+        t = e.get("published_parsed") or e.get("updated_parsed")
+        if not t:
+            continue                               # undated items would look "new" on every build
+        dt = datetime(*t[:6], tzinfo=timezone.utc)
+        if dt > now + timedelta(minutes=5):
+            dt = now
+        if dt < now - timedelta(days=3):
+            continue
+        raw = clean(e.get("summary") or e.get("description") or "")
+        summary = tr.trim_sentences(raw, WORLD_EXCERPT) if raw else ""
+        if summary.lower().startswith(title.lower()[:40]) and len(summary) <= len(title) + 5:
+            summary = ""
+        hay = title + " " + summary + " " + " ".join(t.get("term", "") or "" for t in e.get("tags", []))
+        clubs = [c for c, rx in WORLD_CLUBS.items() if rx.search(hay)]
+        if club and club not in clubs:
+            clubs.insert(0, club)
+        items.append({
+            "title": title, "link": link, "summary": summary, "image": find_image(e), "source": source,
+            "lang": "az", "world": True, "orig_lang": lang, "orig_title": title,
+            "category": "Futbol", "clubs": clubs, "ts": int(dt.timestamp()),
+            "time": dt.astimezone(BAKU).strftime("%d.%m.%Y %H:%M"),
+        })
+    return source, url, "world", items, getattr(d, "status", None)
+
+
+def translate_world(items):
+    """Translate headline + excerpt of world items into Azerbaijani (cached, with fallback)."""
+    T = tr.Translator()
+    by_lang = {}
+    for it in items:
+        by_lang.setdefault(it["orig_lang"], []).append(it)
+    for lang, group in by_lang.items():
+        titles = [tr.pre_process(i["title"], lang) for i in group]
+        sums = [tr.pre_process(i["summary"], lang) for i in group]
+        out = T.translate_many(titles + sums, lang)
+        for i, it in enumerate(group):
+            t_az, s_az = out[i], out[len(group) + i]
+            it["translated"] = bool(t_az)
+            it["title"] = tr.post_process(t_az, "title") if t_az else it["title"]
+            if it["summary"]:
+                it["summary"] = tr.post_process(s_az, "summary", WORLD_EXCERPT + 40) if s_az else it["summary"]
+    T.save()
+    return T.stats, getattr(T, "last_error", None)
+
+
 def main():
     all_items, report = [], []
     with cf.ThreadPoolExecutor(12) as ex:
         for source, url, lang, items, status in ex.map(lambda f: fetch(*f), FEEDS):
             report.append((source, url, lang, len(items), status))
             all_items += items
+        world_res = list(ex.map(lambda f: fetch_world(*f), WORLD_FEEDS))
+    world = []
+    for source, url, lang, items, status in world_res:
+        report.append((source, url, lang, len(items), status))
+        world += items
+    seen_w, wu = set(), []
+    for it in world:                                  # dedupe before translating
+        k = it["link"].split("?")[0].rstrip("/")
+        if k not in seen_w:
+            seen_w.add(k); wu.append(it)
+    t0 = datetime.now()
+    tstats, terr = translate_world(wu)
+    ttime = (datetime.now() - t0).total_seconds()
+    all_items += wu
     seen, uniq = set(), []
     for it in sorted(all_items, key=lambda x: -x["ts"]):
         key = it["link"].split("?")[0].rstrip("/")
@@ -239,7 +348,7 @@ def main():
     OUT.mkdir()
     shutil.copytree(ROOT / "assets", OUT / "assets")
     built = datetime.now(BAKU).strftime("%d.%m.%Y %H:%M")
-    payload = {"site": SITE_NAME, "built": built, "order": ORDER, "clubs": list(CLUBS), "items": uniq,
+    payload = {"site": SITE_NAME, "built": built, "order": ORDER, "clubs": list(CLUBS), "items": uniq, "lang_label": LANG_LABEL,
                "sources": [{"name": s, "url": u, "lang": l, "count": n} for s, u, l, n, _ in report if n]}
     (OUT / "news.json").write_text(json.dumps(payload, ensure_ascii=False), "utf-8")
     tpl = (ROOT / "templates" / "index.html").read_text("utf-8")
@@ -261,7 +370,11 @@ def main():
 
     for s, u, l, n, st in report:
         print(f"{'OK ' if n else 'FAIL'} [{l}] {s:20} {n:3} items  (HTTP {st})  {u}")
-    az = [i for i in uniq if i["lang"] == "az"]
+    wn = [i for i in uniq if i.get("world")]
+    print(f"World football: {len(wn)} items, translated {sum(i.get('translated', False) for i in wn)}, "
+          f"real {sum('Real Madrid' in i['clubs'] for i in wn)}, barsa {sum('Barselona' in i['clubs'] for i in wn)}; "
+          f"translation {tstats} in {ttime:.0f}s" + (f"; last error: {terr}" if terr else ""))
+    az = [i for i in uniq if i["lang"] == "az" and not i.get("world")]
     print(f"Total unique: {len(uniq)}  (az {len(az)}, ru {len(uniq)-len(az)}, futbol {sum(i['category']=='Futbol' for i in az)}, real {sum('Real Madrid' in i['clubs'] for i in uniq)}, barsa {sum('Barselona' in i['clubs'] for i in uniq)})  built {built} Bakı vaxtı")
     return 0 if az else 1
 

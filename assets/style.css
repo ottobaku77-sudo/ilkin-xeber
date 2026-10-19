@@ -69,3 +69,6 @@ mark{background:#ffe58a;color:#000;border-radius:3px}
 .ctag{font-size:.72rem;font-weight:700;color:var(--green);border:1px solid var(--green);border-radius:999px;padding:1px 8px}
 @media (max-width:520px){.tabs{order:3;width:100%;margin:6px 0 0}.tab{flex:1;text-align:center}.right{margin-left:auto}}
 .cats[hidden]{display:none}
+.badge-world{position:absolute;right:10px;bottom:10px;max-width:calc(100% - 20px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:rgba(15,23,42,.82);color:#fff;font-size:.7rem;font-weight:700;padding:3px 9px;border-radius:999px;backdrop-filter:blur(4px)}
+.trnote{font-size:.7rem;color:var(--muted,#64748b);font-style:italic}
+.chip-world[aria-pressed="true"]{background:#0f172a;border-color:#0f172a;color:#fff}
