@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{SITE_NAME}} — новости Азербайджана</title>
+<meta name="description" content="{{SITE_NAME}}: последние новости Азербайджана на русском языке из ведущих СМИ. Обновлено {{BUILT}} (МСК).">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-row">
+    <a class="logo" href="./"><span class="logo-mark">İ</span><span class="logo-text">{{SITE_NAME}}</span></a>
+    <span class="updated">Обновлено {{BUILT}} МСК</span>
+  </div>
+  <div class="wrap tools">
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 0 1 6.3 12.9l5.4 5.4-1.4 1.4-5.4-5.4A8 8 0 1 1 10 2zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>
+      <input id="q" type="search" placeholder="Поиск по новостям…" autocomplete="off">
+    </label>
+    <select id="src" aria-label="Источник"><option value="">Все источники</option></select>
+  </div>
+  <nav class="wrap cats" id="cats" aria-label="Рубрики"></nav>
+</header>
+
+<main class="wrap">
+  <p class="count" id="count"></p>
+  <section class="grid" id="grid"></section>
+  <p class="empty" id="empty" hidden>Ничего не найдено. Попробуйте изменить запрос или фильтр.</p>
+  <div class="more-row"><button id="more" class="more" hidden>Показать ещё</button></div>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p><b>{{SITE_NAME}}</b> — агрегатор заголовков. Показываются только заголовки и краткие анонсы; полные тексты принадлежат источникам и открываются на их сайтах.</p>
+    <p class="srcs" id="srcs"></p>
+  </div>
+</footer>
+<script>window.NEWS = {{DATA}};</script>
+<script src="assets/app.js"></script>
+</body>
+</html>
