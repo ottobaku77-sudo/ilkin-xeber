@@ -43,6 +43,29 @@ mark{background:#ffe58a;color:#000;border-radius:3px}
 .more{font:inherit;font-weight:600;border:0;background:var(--ink);color:var(--card);padding:12px 26px;border-radius:999px;cursor:pointer}
 .foot{border-top:1px solid var(--line);color:var(--muted);font-size:.85rem;padding:20px 0 32px;background:var(--card)}
 .foot a{color:var(--accent)}
-@media (max-width:520px){.updated{display:none}.logo{font-size:1.2rem}}
+@media (max-width:760px){.updated{display:none}}
+@media (max-width:520px){.logo{font-size:1.2rem}}
 .thumb.noimg::after{content:attr(data-src);font-weight:800;font-size:1.2rem;color:#fff;letter-spacing:.02em}
 @media (max-width:520px){select{max-width:38%;font-size:.9rem;padding:9px 8px}}
+/* v2: tabs, language toggle, football */
+.top-row{flex-wrap:wrap}
+.tabs{display:flex;gap:4px;margin-right:auto;margin-left:12px}
+.tab{padding:7px 14px;border-radius:999px;font-weight:700;font-size:.95rem;color:var(--muted)}
+.tab[aria-current=page]{background:var(--ink);color:var(--card)}
+.tab-foot{color:var(--green);border:1.5px solid var(--green)}
+.tab-foot[aria-current=page]{background:var(--green);color:#fff;border-color:var(--green)}
+.right{display:flex;align-items:center;gap:10px}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.lang button{font:inherit;font-size:.8rem;font-weight:700;border:0;background:var(--card);color:var(--muted);padding:6px 11px;cursor:pointer}
+.lang button[aria-pressed=true]{background:var(--accent);color:#fff}
+.chip-foot{border-color:var(--green);color:var(--green);font-weight:700}
+.chip-foot[aria-pressed=true]{background:var(--green);border-color:var(--green);color:#fff}
+.clubs{align-items:center;padding-top:0}
+.sub-label{flex:none;font-size:.82rem;color:var(--muted);margin-right:2px}
+.chip-club[aria-pressed=true]{background:var(--green);border-color:var(--green);color:#fff}
+.badge-foot{background:rgba(40,120,30,.9)}
+.badge-ru{position:absolute;right:10px;top:10px;background:var(--red);color:#fff;font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:999px}
+.ctags{display:flex;gap:6px;flex-wrap:wrap}
+.ctag{font-size:.72rem;font-weight:700;color:var(--green);border:1px solid var(--green);border-radius:999px;padding:1px 8px}
+@media (max-width:520px){.tabs{order:3;width:100%;margin:6px 0 0}.tab{flex:1;text-align:center}.right{margin-left:auto}}
+.cats[hidden]{display:none}

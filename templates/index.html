@@ -1,43 +1,56 @@
 <!doctype html>
-<html lang="ru">
+<html lang="az">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{SITE_NAME}} — новости Азербайджана</title>
-<meta name="description" content="{{SITE_NAME}}: последние новости Азербайджана на русском языке из ведущих СМИ. Обновлено {{BUILT}} (МСК).">
+<title>{{TITLE}}</title>
+<meta name="description" content="{{DESC}} Yeniləndi: {{BUILT}} (Bakı vaxtı).">
+<meta property="og:title" content="{{TITLE}}">
+<meta property="og:description" content="{{DESC}}">
+<meta property="og:locale" content="az_AZ">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/style.css">
 </head>
-<body>
+<body data-page="{{PAGE}}">
 <header class="top">
   <div class="wrap top-row">
     <a class="logo" href="./"><span class="logo-mark">İ</span><span class="logo-text">{{SITE_NAME}}</span></a>
-    <span class="updated">Обновлено {{BUILT}} МСК</span>
+    <nav class="tabs" aria-label="Bölmələr">
+      <a href="./" class="tab" data-tab="home">Xəbərlər</a>
+      <a href="futbol.html" class="tab tab-foot" data-tab="futbol">⚽ Futbol</a>
+    </nav>
+    <div class="right">
+      <span class="updated">Yeniləndi {{BUILT}} · Bakı vaxtı</span>
+      <div class="lang" role="group" aria-label="Dil">
+        <button data-l="az" aria-pressed="true">AZ</button><button data-l="ru" aria-pressed="false">RU</button>
+      </div>
+    </div>
   </div>
   <div class="wrap tools">
     <label class="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 2a8 8 0 0 1 6.3 12.9l5.4 5.4-1.4 1.4-5.4-5.4A8 8 0 1 1 10 2zm0 2a6 6 0 1 0 0 12 6 6 0 0 0 0-12z"/></svg>
-      <input id="q" type="search" placeholder="Поиск по новостям…" autocomplete="off">
+      <input id="q" type="search" placeholder="Xəbərlərdə axtar…" autocomplete="off">
     </label>
-    <select id="src" aria-label="Источник"><option value="">Все источники</option></select>
+    <select id="src" aria-label="Mənbə"><option value="">Bütün mənbələr</option></select>
   </div>
-  <nav class="wrap cats" id="cats" aria-label="Рубрики"></nav>
+  <nav class="wrap cats" id="cats" aria-label="Rubrikalar"></nav>
+  <nav class="wrap cats clubs" id="clubs" aria-label="Komandalar" hidden></nav>
 </header>
 
 <main class="wrap">
   <p class="count" id="count"></p>
   <section class="grid" id="grid"></section>
-  <p class="empty" id="empty" hidden>Ничего не найдено. Попробуйте изменить запрос или фильтр.</p>
-  <div class="more-row"><button id="more" class="more" hidden>Показать ещё</button></div>
+  <p class="empty" id="empty" hidden>Heç nə tapılmadı. Sorğunu və ya filtri dəyişin.</p>
+  <div class="more-row"><button id="more" class="more" hidden>Daha çox göstər</button></div>
 </main>
 
 <footer class="foot">
   <div class="wrap">
-    <p><b>{{SITE_NAME}}</b> — агрегатор заголовков. Показываются только заголовки и краткие анонсы; полные тексты принадлежат источникам и открываются на их сайтах.</p>
+    <p><b>{{SITE_NAME}}</b> — xəbər başlıqları aqreqatoru. Yalnız başlıqlar və qısa anonslar göstərilir; tam mətnlər mənbələrə məxsusdur və onların saytlarında açılır. Xəbərlər hər 30 dəqiqədən bir avtomatik yenilənir. Vaxt Bakı vaxtı ilə (UTC+4) göstərilir.</p>
     <p class="srcs" id="srcs"></p>
   </div>
 </footer>
-<script>window.NEWS = {{DATA}};</script>
+<script>window.NEWS = {{DATA}}; window.PRESET_CAT = {{PRESET}};</script>
 <script src="assets/app.js"></script>
 </body>
 </html>

@@ -1,52 +1,130 @@
 #!/usr/bin/env python3
-"""İlkin xəbər — static news aggregator about Azerbaijan (Russian-language feeds).
+"""İlkin xəbər — Azərbaycan xəbərləri aqreqatoru (əsas dil: Azərbaycan dili).
 
-Fetches public RSS feeds, keeps only headline + short excerpt + link to the original,
-and writes a static site into ./site (index.html, news.json, assets).
+Açıq RSS lentlərindən yalnız başlıq + qısa anons + orijinala keçid götürür
+və ./site qovluğuna statik sayt yazır (index.html, futbol.html, news.json).
+Secondary Russian feeds are kept behind an "RU" toggle (default view: AZ only).
 Usage:  python build.py
 """
 import concurrent.futures as cf
-import html, json, re, shutil, sys
-from datetime import datetime, timezone
+import html, json, re, shutil, socket, sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import feedparser
 
+socket.setdefaulttimeout(25)
 SITE_NAME = "İlkin xəbər"
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "site"
-MSK = ZoneInfo("Europe/Moscow")
+BAKU = ZoneInfo("Asia/Baku")          # UTC+4
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-PER_SOURCE = 30          # max items per source
-EXCERPT_LEN = 220        # characters of summary shown
+PER_SOURCE = 25
+EXCERPT_LEN = 220
 
+# (name, url, lang, kind)  kind: "news" | "sport" | "football"
 FEEDS = [
-    ("Report.az",  "https://report.az/ru/rss"),
-    ("Trend",      "https://ru.trend.az/feeds/index.rss"),
-    ("APA",        "https://ru.apa.az/rss"),
-    ("Day.Az",     "https://news.day.az/rss/all.rss"),
-    ("Haqqin.az",  "https://haqqin.az/rss"),
-    ("Sputnik Азербайджан", "https://az.sputniknews.ru/export/rss2/archive/index.xml"),
-    ("Vesti.az",   "https://vesti.az/rss"),
-    ("Minval",     "https://minval.az/rss"),
-    ("Media.az",   "https://media.az/rss"),
+    # --- Azərbaycan dilində (əsas) ---
+    ("Report.az",     "https://report.az/az/rss",           "az", "news"),
+    ("APA",           "https://apa.az/rss",                 "az", "news"),
+    ("Trend",         "https://az.trend.az/feeds/index.rss", "az", "news"),
+    ("Modern.az",     "https://modern.az/rss",              "az", "news"),
+    ("Moderator.az",  "https://moderator.az/rss",           "az", "news"),
+    ("Milli.Az",      "https://milli.az/rss/",              "az", "news"),
+    ("Axar.az",       "https://axar.az/rss/",               "az", "news"),
+    ("Publika.az",    "https://publika.az/rss/",            "az", "news"),
+    ("Teleqraf",      "https://teleqraf.az/rss/",           "az", "news"),
+    ("Metbuat.az",    "https://metbuat.az/rss.xml",         "az", "news"),
+    ("Lent.az",       "https://lent.az/rss",                "az", "news"),
+    ("Bakupost",      "https://bakupost.az/rss",            "az", "news"),
+    ("AzVision",      "https://azvision.az/rss.xml",        "az", "news"),
+    ("Azxeber",       "https://azxeber.com/rss",            "az", "news"),
+    ("Olaylar",       "https://olaylar.az/rss/",            "az", "news"),
+    # --- İdman / futbol ---
+    ("Qol.az",        "https://qol.az/rss/",                "az", "football"),
+    ("Sportify.az",   "https://sportify.az/feed/",          "az", "sport"),
+    ("APA Sport",     "https://apasport.az/rss",            "az", "sport"),
+    # --- Rus dilində (ikinci dərəcəli, "RU" düyməsi) ---
+    ("Report.az RU",  "https://report.az/ru/rss",           "ru", "news"),
+    ("Trend RU",      "https://ru.trend.az/feeds/index.rss", "ru", "news"),
+    ("APA RU",        "https://ru.apa.az/rss",              "ru", "news"),
+    ("Day.Az",        "https://news.day.az/rss/all.rss",    "ru", "news"),
+    ("Haqqin.az",     "https://haqqin.az/rss",              "ru", "news"),
+    # --- Beynəlxalq futbol (rus dilində): yalnız "Real Madrid" / "Barselona" xəbərləri ---
+    ("Championat",    "https://www.championat.com/rss/news/football/", "ru", "clubs"),
+    ("Sport-Express", "https://www.sport-express.ru/services/materials/news/football/se/", "ru", "clubs"),
+    ("Sports.ru",     "https://www.sports.ru/rss/rubric.xml?s=208", "ru", "clubs"),
+    ("Sputnik Azərbaycan", "https://az.sputniknews.ru/export/rss2/archive/index.xml", "ru", "news"),
+    ("Vesti.az",      "https://vesti.az/rss",               "ru", "news"),
+    ("Minval",        "https://minval.az/rss",              "ru", "news"),
 ]
+LIMIT = {"football": 40, "sport": 40, "clubs": 30}
+SCAN = {"clubs": 400}
 
-# Normalise very different feed categories into a small set.
+
+
+def low(s):
+    """Azerbaijani/Turkish-aware lowercase."""
+    return (s or "").replace("İ", "i").replace("I", "ı").lower()
+
+
+# Football club sub-tags (inside "Futbol"). Quoted/inflected forms avoid the
+# common words "real" / "sabah".
+CLUBS = {
+    "Real Madrid": re.compile(low(
+        r"real madrid|(?<!atletiko )(?<!atletico )madrid|[\"«“']real\b|\breal[\"»”']|\breal(ın|ı|a|la|dan|də)\b(?! sosyedad)|"
+        r"mbappe|mbappé|vinisius|vinícius|ançelotti|ancelotti|xabi alonso|\balonso\b|bernabeu|bernabéu|"
+        r"arda güler|bellingem|bellingham|el klasiko|el clasico|"
+        r"\bреал(а|у|ом|е)?\b(?! сосьедад)|(?<!атлетико )\bмадрид|мбапп|винисиус|анчелотти|\bалонсо|бернабеу|беллингем|эль класико|эль-класико")),
+    "Barselona": re.compile(low(
+        r"barselona|barcelona|\bbarsa|barça|\bbarca\b|lamin yamal|\byamal|levandovski|lewandowski|\bflik\b|hansi flik|"
+        r"kamp nou|camp nou|el klasiko|el clasico|"
+        r"барселон|\bбарс[аеуы]\b|\bямал|левандовск|\bфлик\b|камп ноу|эль класико|эль-класико")),
+}
+
+
+def clubs_of(text):
+    t = low(text)
+    return [c for c, rx in CLUBS.items() if rx.search(t)]
+
+# Futbol: checked first (tags + headline). Quoted club names avoid clashes with
+# the common words "sabah" (tomorrow) and the region "Qarabağ".
+FOOTBALL = re.compile(low(
+    r"futbol|футбол|premyer liqa|primer liqa|çempionlar liqası|avropa liqası|konfrans liqası|"
+    r"uefa|fifa|affa|\bpfl\b|millimiz|\bmilli komanda|baş məşqçi|qapıçı|hücumçu|yarımmüdafiəçi|müdafiəçi|"
+    r"\bqol(u|lar|unu|la)?\b|penalti|\bmatç|transfer|legioner|"
+    r"[\"«“']neftçi|neftçi[\"»”']|[\"«“']qarabağ[\"»”']|qarabağ fk|[\"«“']sabah[\"»”']|[\"«“']zirə|[\"«“']turan tovuz|"
+    r"[\"«“']sumqayıt[\"»”']|[\"«“']kəpəz|[\"«“']araz-naxçıvan|[\"«“']səbail|[\"«“']şamaxı[\"»”']|[\"«“']qəbələ[\"»”']|"
+    r"real madrid|barselona|mançester|liverpul|arsenal|çelsi|bavariya|yuventus|borussiya|mbappe|ronaldo|\bmessi\b|"
+    r"dunyafutbolu|olkefutbolu|premyerliqa|championsligue|"
+    r"qарабах|нефтчи|лига чемпионов|премьер-лиг"))
+SPORT_NOT_FOOTBALL = re.compile(low(r"güləş|cüdo|boks|basketbol|voleybol|gimnastika|atletika|karate|tennis|taekvondo|şahmat|avarçəkmə|üzgüçülük|formula|döyüş"))
+
+# Category rules (matched on feed tags first, then headline). Azerbaijani + Russian roots.
 CATEGORIES = [
-    ("Политика",     r"полит|парламент|президент|дипломат|внешн|карабах|армени|госуд|власт|выбор"),
-    ("Экономика",    r"эконом|бизнес|финанс|банк|нефт|газ|энерг|рынок|транспорт|туризм|агро|ИКТ|налог|бирж"),
-    ("Происшествия", r"происш|криминал|инцидент|ДТП|авари|кримин|суд|прав"),
-    ("Спорт",        r"спорт|футбол|чемпион|олимп"),
-    ("Технологии",   r"технолог|IT|ИКТ|наука|интернет|гаджет|телеком"),
-    ("Культура",     r"культур|шоу|кино|искусств|музык|звезд|lifestyle|стиль"),
-    ("Общество",     r"обществ|социал|образован|здоров|медиц|погод|экологи|религ"),
-    ("Мир",          r"мир|регион|росси|турци|иран|груз|европ|азия|сша|ближн|украин|международ"),
+    ("Siyasət",      r"siyasət|prezident|parlament|milli məclis|diplomat|nazir|rəsmi|xronika|seçki|dövlət|"
+                     r"полит|парламент|президент|дипломат|внешн|выбор|власт"),
+    ("İqtisadiyyat", r"iqtisad|biznes|maliyyə|bank|neft|qaz\b|enerji|energetika|sənaye|birja|vergi|infrastruktur|"
+                     r"aqrar|ikt\b|kripto|manat|ixrac|investisiya|tarif|qiymət|"
+                     r"эконом|бизнес|финанс|банк|нефт|энерг|рынок|налог|бирж"),
+    ("Hadisə",       r"hadisə|kriminal|qəza|yanğın|yandır|həbs|tutul|istintaq|saxlanıl|vəfat|məhkəmə|polis|cinayət|ölüb|yaralan|zəlzələ|"
+                     r"происш|криминал|инцидент|дтп|авари|суд"),
+    ("İdman",        r"idman|olimpiya|çempion|güləş|cüdo|boks|basketbol|voleybol|şahmat|спорт"),
+    ("Mədəniyyət",   r"mədəniyyət|incəsənət|ədəbiyyat|teatr|kino|musiqi|şou|magazin|müğənni|aktyor|yaşam|"
+                     r"культур|шоу|кино|искусств|музык"),
+    ("Cəmiyyət",     r"cəmiyyət|sosial|toplum|təhsil|elm|səhiyyə|sağlamlıq|hava|ekologiya|din\b|media|region|gündəm|daxili|"
+                     r"обществ|социал|образован|здоров|медиц|погод|экологи"),
+    ("Dünya",        r"dünya|xarici|avropa|asiya|amerika|mdb|digər ölkələr|türkiyə|rusiya|iran|gürcüstan|ukrayna|abş|fransa|almaniya|çin\b|israil|britaniya|ermənistan|tramp|putin|"
+                     r"мир|регион|росси|турци|иран|груз|европ|азия|сша|украин|международ"),
 ]
+CATEGORIES = [(n, re.compile(low(rx))) for n, rx in CATEGORIES]
+ORDER = ["Futbol", "Siyasət", "İqtisadiyyat", "Cəmiyyət", "Hadisə", "İdman", "Dünya", "Mədəniyyət", "Digər"]
 
 TAG_RE = re.compile(r"<[^>]+>")
 IMG_RE = re.compile(r"<img[^>]+src=[\"']([^\"']+)", re.I)
+AZ_CHARS = re.compile(r"[əğışçöüƏĞİŞÇÖÜ]")
+CYR = re.compile(r"[а-яА-ЯёЁ]")
 
 
 def clean(text):
@@ -58,8 +136,7 @@ def excerpt(text, n=EXCERPT_LEN):
     text = clean(text)
     if len(text) <= n:
         return text
-    cut = text[:n].rsplit(" ", 1)[0]
-    return cut.rstrip(",.;:—- ") + "…"
+    return text[:n].rsplit(" ", 1)[0].rstrip(",.;:—- ") + "…"
 
 
 def find_image(e):
@@ -73,76 +150,120 @@ def find_image(e):
     for l in e.get("links", []):
         if l.get("type", "").startswith("image"):
             return l.get("href")
-    blobs = [e.get("summary", "")] + [c.get("value", "") for c in e.get("content", [])]
-    for b in blobs:
+    for b in [e.get("summary", "")] + [c.get("value", "") for c in e.get("content", [])]:
         m = IMG_RE.search(b or "")
         if m:
             return m.group(1)
     return None
 
 
-def categorize(tags, title):
-    hay = " ".join(tags) or ""
+def categorize(tags, title, kind):
+    t_tags, t_title = low(" ".join(tags)), low(title)
+    if kind in ("football", "clubs"):
+        return "Futbol"
+    if kind == "sport":
+        if SPORT_NOT_FOOTBALL.search(t_tags + " " + t_title):
+            return "İdman"
+        return "Futbol" if FOOTBALL.search(t_tags + " " + t_title) else "İdman"
+    if re.search(r"futbol|футбол", t_tags) or FOOTBALL.search(t_title):
+        return "Futbol"
     for name, rx in CATEGORIES:
-        if hay and re.search(rx, hay, re.I):
+        if t_tags and rx.search(t_tags):
             return name
-    for name, rx in CATEGORIES:            # fallback: guess from the headline
-        if name != "Мир" and re.search(rx, title, re.I):
+    for name, rx in CATEGORIES:
+        if name != "Cəmiyyət" and rx.search(t_title):
             return name
-    return "Мир" if re.search(CATEGORIES[-1][1], hay, re.I) else "Разное"
+    return "Digər"
 
 
-def fetch(source, url):
-    d = feedparser.parse(url, agent=UA)
+def fetch(source, url, lang, kind):
+    try:
+        d = feedparser.parse(url, agent=UA)
+    except Exception as ex:                       # network errors -> empty source
+        return source, url, lang, [], f"ERR {ex}"
+    now = datetime.now(timezone.utc)
     items = []
-    for e in d.entries[:PER_SOURCE]:
+    for e in d.entries[:SCAN.get(kind, LIMIT.get(kind, PER_SOURCE) * 2)]:
+        if len(items) >= LIMIT.get(kind, PER_SOURCE):
+            break
         title, link = clean(e.get("title")), e.get("link")
         if not title or not link:
             continue
-        t = e.get("published_parsed") or e.get("updated_parsed")
-        dt = datetime(*t[:6], tzinfo=timezone.utc) if t else datetime.now(timezone.utc)
+        tags = [t.get("term", "") or "" for t in e.get("tags", [])]
         summary = excerpt(e.get("summary") or e.get("description") or "")
-        if summary.lower().startswith(title.lower()[:40].lower()) and len(summary) <= len(title) + 5:
+        if lang == "az":                          # keep only Azerbaijani-language items
+            if any(t.lower() in ("ru", "en") for t in tags) or len(CYR.findall(title)) > 3:
+                continue
+            if not AZ_CHARS.search(title + " " + summary):
+                continue
+        clubs = clubs_of(title + " " + summary + " " + " ".join(tags))
+        if kind == "clubs" and not clubs:
+            continue
+        t = e.get("published_parsed") or e.get("updated_parsed")
+        dt = datetime(*t[:6], tzinfo=timezone.utc) if t else now
+        if dt > now + timedelta(minutes=5):       # some feeds label Baku time as UTC
+            dt -= timedelta(hours=4)
+            if dt > now + timedelta(minutes=5):
+                dt = now
+        if dt < now - timedelta(days=4):
+            continue
+        if summary.lower().startswith(title.lower()[:40]) and len(summary) <= len(title) + 5:
             summary = ""
-        tags = [t.get("term", "") for t in e.get("tags", [])]
+        cat = categorize(tags, title, kind)
+        if clubs and cat == "İdman":
+            cat = "Futbol"
         items.append({
             "title": title, "link": link, "summary": summary,
-            "image": find_image(e), "source": source,
-            "category": categorize(tags, title),
+            "image": find_image(e), "source": source, "lang": lang,
+            "category": cat, "clubs": clubs if cat == "Futbol" else [],
             "ts": int(dt.timestamp()),
-            "time": dt.astimezone(MSK).strftime("%d.%m.%Y %H:%M"),
+            "time": dt.astimezone(BAKU).strftime("%d.%m.%Y %H:%M"),
         })
-    return source, url, items, getattr(d, "status", None)
+    return source, url, lang, items, getattr(d, "status", None)
 
 
 def main():
     all_items, report = [], []
-    with cf.ThreadPoolExecutor(8) as ex:
-        for source, url, items, status in ex.map(lambda f: fetch(*f), FEEDS):
-            report.append((source, url, len(items), status))
+    with cf.ThreadPoolExecutor(12) as ex:
+        for source, url, lang, items, status in ex.map(lambda f: fetch(*f), FEEDS):
+            report.append((source, url, lang, len(items), status))
             all_items += items
-    # de-duplicate by link, newest first
     seen, uniq = set(), []
     for it in sorted(all_items, key=lambda x: -x["ts"]):
-        if it["link"] not in seen:
-            seen.add(it["link"]); uniq.append(it)
+        key = it["link"].split("?")[0].rstrip("/")
+        if key not in seen:
+            seen.add(key); uniq.append(it)
 
-    OUT.mkdir(exist_ok=True)
-    shutil.copytree(ROOT / "assets", OUT / "assets", dirs_exist_ok=True)
-    built = datetime.now(MSK).strftime("%d.%m.%Y %H:%M")
-    payload = {"site": SITE_NAME, "built": built, "items": uniq,
-               "sources": [{"name": s, "url": u, "count": n} for s, u, n, _ in report if n]}
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    OUT.mkdir()
+    shutil.copytree(ROOT / "assets", OUT / "assets")
+    built = datetime.now(BAKU).strftime("%d.%m.%Y %H:%M")
+    payload = {"site": SITE_NAME, "built": built, "order": ORDER, "clubs": list(CLUBS), "items": uniq,
+               "sources": [{"name": s, "url": u, "lang": l, "count": n} for s, u, l, n, _ in report if n]}
     (OUT / "news.json").write_text(json.dumps(payload, ensure_ascii=False), "utf-8")
     tpl = (ROOT / "templates" / "index.html").read_text("utf-8")
-    page = (tpl.replace("{{SITE_NAME}}", html.escape(SITE_NAME))
-               .replace("{{BUILT}}", built)
-               .replace("{{DATA}}", json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")))
-    (OUT / "index.html").write_text(page, "utf-8")
+    data = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    pages = {
+        "index.html":  ("", f"{SITE_NAME} — Azərbaycan xəbərləri", "Azərbaycanın ən son xəbərləri: siyasət, iqtisadiyyat, cəmiyyət, futbol, idman və dünya."),
+        "futbol.html": ("Futbol", f"Futbol — {SITE_NAME}", "Azərbaycan və dünya futbolu: Premyer Liqa, Çempionlar Liqası, millimiz, transferlər."),
+    }
+    for fname, (preset, title, desc) in pages.items():
+        page = (tpl.replace("{{SITE_NAME}}", html.escape(SITE_NAME))
+                   .replace("{{TITLE}}", html.escape(title))
+                   .replace("{{DESC}}", html.escape(desc))
+                   .replace("{{PAGE}}", "futbol" if preset else "home")
+                   .replace("{{BUILT}}", built)
+                   .replace("{{PRESET}}", json.dumps(preset))
+                   .replace("{{DATA}}", data))
+        (OUT / fname).write_text(page, "utf-8")
+    (OUT / ".nojekyll").write_text("")
 
-    for s, u, n, st in report:
-        print(f"{'OK ' if n else 'FAIL'} {s:22} {n:3} items  (HTTP {st})  {u}")
-    print(f"Total unique items: {len(uniq)}  ->  {OUT/'index.html'}  (built {built} MSK)")
-    return 0 if uniq else 1
+    for s, u, l, n, st in report:
+        print(f"{'OK ' if n else 'FAIL'} [{l}] {s:20} {n:3} items  (HTTP {st})  {u}")
+    az = [i for i in uniq if i["lang"] == "az"]
+    print(f"Total unique: {len(uniq)}  (az {len(az)}, ru {len(uniq)-len(az)}, futbol {sum(i['category']=='Futbol' for i in az)}, real {sum('Real Madrid' in i['clubs'] for i in uniq)}, barsa {sum('Barselona' in i['clubs'] for i in uniq)})  built {built} Bakı vaxtı")
+    return 0 if az else 1
 
 
 if __name__ == "__main__":
